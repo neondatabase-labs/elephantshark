@@ -128,9 +128,12 @@ module Colour
   S2C = "35"
   C2S = "36"
   NOTE = "33"
+  CONN = "34"
+  LEN = "34"
 end
 
 def colour(c, s) COLOURFUL ? "\033[#{c}m#{s}\033[0m": s end
+
 def annotate(*args)
   args.each_slice(2)
       .map { |s, annot| " #{s}#{ANNOTATE ? colour(Colour::NOTE, " = #{annot}") : ""}" }
@@ -153,7 +156,6 @@ class PgMessage
     @i = 0
   end
 
-  def line_break() "\n    " end
   def text_or_binary(v) v == 0 ? "text" : v == 1 ? "binary" : "unknown" end
 
   # methods to read from @msg: each returns [value, representation]
@@ -208,11 +210,11 @@ class PgMessage
       loop do
         keyv, keyr, = cstr
         if keyv.empty?
-          s += line_break + annotate(keyr, "end")
+          s += "\n" + annotate(keyr, "end")
           break
         end
         _, valuer = cstr
-        s += line_break + annotate(keyr, "key", valuer, "value")
+        s += "\n" + annotate(keyr, "key", valuer, "value")
       end
 
     else
@@ -241,7 +243,7 @@ class PgMessage
           colcountv, colcountr = int16
           s += annotate(colcountr, "#{colcountv} columns follow")
           colcountv.times do
-            s += line_break
+            s += "\n"
             collenv, collenr = int32
             if collenv == -1
               s += annotate(collenr, "null column value")
@@ -254,7 +256,7 @@ class PgMessage
 
         when "E"
           loop do
-            s += line_break
+            s += "\n"
             errfieldv, errfieldr = char
             if errfieldv == bin_str("\x00")
               s += annotate(errfieldr, "end")
@@ -321,7 +323,7 @@ class PgMessage
 
           when 10
             begin
-              s += line_break
+              s += "\n"
               mechv, mechr = cstr
               s += annotate(mechr, mechv.empty? ? "end" : "SASL mechanism")
             end until mechv.empty?
@@ -329,12 +331,12 @@ class PgMessage
 
           when 11
             _, scramdatar = str(lenv - 8)
-            s += line_break + annotate(scramdatar, "SCRAM server-first-message")
+            s += "\n" + annotate(scramdatar, "SCRAM server-first-message")
             "AuthenticationSASLContinue"
 
           when 12
             _, scramdatar = str(lenv - 8)
-            s += line_break + annotate(scramdatar, "SCRAM server-final-message")
+            s += "\n" + annotate(scramdatar, "SCRAM server-final-message")
             "AuthenticationSASLFinal"
 
           else
@@ -354,14 +356,14 @@ class PgMessage
           colcountv.times do
             _, namer = cstr
             taboidv, taboidr, tabattrnumv, tabattrnumr = int32 + int16
-            s += line_break + annotate(
+            s += "\n" + annotate(
               namer, "column name",
               taboidr, "table OID: #{taboidv}",
               tabattrnumr, "table attrib no: #{tabattrnumv}"
             )
             typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
             formatv, formatr = int16
-            s += line_break + annotate(
+            s += "\n" + annotate(
               typoidr, "type OID: #{typoidv}",
               typlenr, "type length: #{typlenv}",
               typmodr, "type modifier: #{typmodv}",
@@ -408,7 +410,7 @@ class PgMessage
           s += annotate(optioncountr, "number of unrecognised protocol options: #{optioncountv}")
           optioncountv.times do
             _, optionr = cstr
-            s += line_break + annotate(optionr, "unrecognised option")
+            s += "\n" + annotate(optionr, "unrecognised option")
           end
           "NegotiateProtocolVersion"
 
@@ -421,13 +423,13 @@ class PgMessage
           _, portalr, _, statementr = cstr + cstr
           s += annotate(portalr, "destination portal", statementr, "source prepared statement")
           code_count, r = int16
-          s += line_break + annotate(r, "#{code_count} parameter format codes follow")
+          s += "\n" + annotate(r, "#{code_count} parameter format codes follow")
           code_count.times do
             v, r = int16
             s += annotate(r, "format: #{text_or_binary(v)}")
           end
           paramcountv, paramcountr = int16
-          s += line_break + annotate(paramcountr, "#{paramcountv} parameter values follow")
+          s += "\n" + annotate(paramcountr, "#{paramcountv} parameter values follow")
           paramcountv.times do
             paramlenv, paramlenr = int32
             if paramlenv == -1
@@ -439,7 +441,7 @@ class PgMessage
             end
           end
           resultcountv, resultcountr = int16
-          s += line_break + annotate(resultcountr, "#{resultcountv} result format codes follow")
+          s += "\n" + annotate(resultcountr, "#{resultcountv} result format codes follow")
           resultcountv.times do
             formatv, formatr = int16
             s += annotate(formatr, "format: #{text_or_binary(formatv)}")
@@ -461,20 +463,20 @@ class PgMessage
           fnoidv, fnoidr = int32
           s += annotate(fnoidr, "function OID: #{fnoidv}")
           formatcountv, formatcountr = int16
-          s += line_break + annotate(formatcountr, "#{formatcountv} format codes follow")
+          s += "\n" + annotate(formatcountr, "#{formatcountv} format codes follow")
           formatcountv.times do
             formatv, formatr = int16
             s += annotate(formatr, "format: #{text_or_binary(formatv)}")
           end
           argscountv, argscountr = int16
-          s += line_break + annotate(argscountr, "#{argscountv} arguments follow")
+          s += "\n" + annotate(argscountr, "#{argscountv} arguments follow")
           argscountv.times do
             arglenv, arglenr = int32
             _, argvalr = str(arglenv)
             s += annotate(arglenr, "#{arglenv} bytes", argvalr, "argument")
           end
           formatv, formatr = int16
-          s += line_break + annotate(formatr, "result format: #{text_or_binary(formatv)}")
+          s += "\n" + annotate(formatr, "result format: #{text_or_binary(formatv)}")
           "FunctionCall"
 
         when "H"; "Flush"
@@ -520,16 +522,16 @@ class PgMessage
 
           when 10 # AuthenticationSASL
             _, mechr  = cstr
-            s += line_break + annotate(mechr, "selected mechanism")
+            s += "\n" + annotate(mechr, "selected mechanism")
             scramlenv, scramlenr = int32
-            s += line_break + annotate(scramlenr, "#{scramlenv} bytes follow")
+            s += "\n" + annotate(scramlenr, "#{scramlenv} bytes follow")
             _, scramdata = str(scramlenv)
-            s += line_break + annotate(scramdata, "SCRAM client-first-message")
+            s += "\n" + annotate(scramdata, "SCRAM client-first-message")
             "SASLInitialResponse"
 
           when 11 # AuthenticationSASLContinue
             _, scramdata = str(lenv - 4)
-            s += line_break + annotate(scramdata, "SCRAM client-final-message")
+            s += "\n" + annotate(scramdata, "SCRAM client-final-message")
             "SASLResponse"
 
           else
@@ -694,9 +696,9 @@ class ServerEOFException < StandardError; end
 
 server = TCPServer.new(options[:listen_ip], options[:listen_port])
 
-conn_num = 0
+conn_num = 1
 def print_conn_num(conn_num)
-  print("\##{conn_num} ")
+  print(colour(Colour::CONN, "\##{conn_num}  "))
 end
 
 loop do
@@ -710,8 +712,13 @@ loop do
   Thread.new(client_sock, conn_num) do |client_sock, conn_num|
 
     cnputs = lambda do |*args|
-      print_conn_num(conn_num)
-      puts(*args)
+      args.each_with_index do |arg, i|
+        arg.split("\n").each_with_index do |line, j|
+          print_conn_num(conn_num)
+          print("  ") unless i == 0 && j == 0
+          puts(line.strip)
+        end
+      end
     end
 
     begin
@@ -779,7 +786,7 @@ loop do
             cnputs.(script_to_client(annotate("S".inspect, "SSL supported")))
 
             client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
-            cnputs.("#{tls_summary(client_sock)} connection established with client", "  server name via SNI: #{target_via_sni}")
+            cnputs.("#{tls_summary(client_sock)} connection established with client", "server name via SNI: #{target_via_sni}")
           end
 
           first_eight = client_sock.read(8)
@@ -789,7 +796,7 @@ loop do
         end
       end
 
-      cnputs.("#{client_sock.cert.to_text}", "  #{client_sock.cert.to_pem}") if options[:log_certs] && client_sock.respond_to?(:cert)
+      cnputs.("#{client_sock.cert.to_text}", "#{client_sock.cert.to_pem}") if options[:log_certs] && client_sock.respond_to?(:cert)
 
       next if first_eight.nil? # start again if disconnected
 
@@ -948,7 +955,8 @@ loop do
           messages = server_reader.available_messages { |str| cnputs.(server_to_client(str)) if log_proxied }
           raise ServerEOFException.new if messages.nil?
           bytes_sent = pg_send(client_sock, messages)
-          cnputs.("^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer") if log_proxied
+          bytes_left = server_reader.buffer.length
+          cnputs.(colour(Colour::LEN, "^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s#{bytes_left > 0 ? ", #{bytes_left} bytes left in buffer" : ""}")) if log_proxied
         end
       end
       thread.report_on_exception = false
@@ -959,7 +967,8 @@ loop do
         messages = client_reader.available_messages { |str| cnputs.(client_to_server(str)) if log_proxied }
         raise ClientEOFException.new if messages.nil?
         bytes_sent = pg_send(server_sock, messages)
-        cnputs.("^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer") if log_proxied
+        bytes_left = client_reader.buffer.length
+        cnputs.(colour(Colour::LEN, "^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}ss#{bytes_left > 0 ? ", #{bytes_left} bytes left in buffer" : ""}")) if log_proxied
       end
 
     rescue ServerEOFException
