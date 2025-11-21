@@ -694,15 +694,26 @@ class ServerEOFException < StandardError; end
 
 server = TCPServer.new(options[:listen_ip], options[:listen_port])
 
-conn_num = 1
-connection_mutex = Mutex.new
+conn_num = 0
+def print_conn_num(conn_num)
+  print("\##{conn_num} ")
+end
 
 loop do
-  puts "#{conn_num}  listening on #{options[:listen_ip]} port #{options[:listen_port]} ..."
+  print_conn_num(conn_num)
+  puts "listening on #{options[:listen_ip]} port #{options[:listen_port]} ..."
+  
   client_sock = server.accept
+  print_conn_num(conn_num)
+  puts "connected at t0 = #{Time.now}"    
 
-  puts "#{conn_num}  connected at t0 = #{Time.now}"       
   Thread.new(client_sock, conn_num) do |client_sock, conn_num|
+
+    cnputs = lambda do |*args|
+      print_conn_num(conn_num)
+      puts(*args)
+    end
+
     begin
       target_via_sni = nil
       t0 = t_now
@@ -747,7 +758,7 @@ loop do
       if first_byte == bin_str("\x16") # start of a TLS handshake record
         client_direct_ssl = true
         client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
-        puts "#{conn_num}  direct #{tls_summary(client_sock)} connection established with client", "#{conn_num}    server name via SNI: #{target_via_sni}"
+        cnputs.("direct #{tls_summary(client_sock)} connection established with client", "  server name via SNI: #{target_via_sni}")
 
         first_eight = client_sock.read(8)
 
@@ -757,28 +768,28 @@ loop do
 
         if first_eight == ssl_request
           client_direct_ssl = false
-          puts "#{conn_num}  " + client_to_script(annotate(hex_inspect(first_eight), "SSLRequest"))
+          cnputs.(client_to_script(annotate(hex_inspect(first_eight), "SSLRequest")))
 
           if options[:deny_ssl]
             client_sock.write("N")
-            puts "#{conn_num}  " + script_to_client(annotate("N".inspect, "SSL not supported"))
+            cnputs.(script_to_client(annotate("N".inspect, "SSL not supported")))
 
           else
             client_sock.write("S")
-            puts "#{conn_num}  " + script_to_client(annotate("S".inspect, "SSL supported"))
+            cnputs.(script_to_client(annotate("S".inspect, "SSL supported")))
 
             client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
-            puts "#{conn_num}  #{tls_summary(client_sock)} connection established with client", "#{conn_num}    server name via SNI: #{target_via_sni}"
+            cnputs.("#{tls_summary(client_sock)} connection established with client", "  server name via SNI: #{target_via_sni}")
           end
 
           first_eight = client_sock.read(8)
 
         else
-          puts "#{conn_num}  no SSLRequest: continuing in plaintext"
+          cnputs.("no SSLRequest: continuing in plaintext")
         end
       end
 
-      puts "#{conn_num}  #{client_sock.cert.to_text}", "#{conn_num}  #{client_sock.cert.to_pem}" if options[:log_certs] && client_sock.respond_to?(:cert)
+      cnputs.("#{client_sock.cert.to_text}", "  #{client_sock.cert.to_pem}") if options[:log_certs] && client_sock.respond_to?(:cert)
 
       next if first_eight.nil? # start again if disconnected
 
@@ -787,14 +798,14 @@ loop do
       len = first_eight[0..3].unpack1("N")
       startup_msg = client_sock.read(len - 8)
       full_startup = first_eight + startup_msg
-      puts "#{conn_num}  " + client_to_script(PgMessage.new(full_startup, :startup).inspect)
+      cnputs.(client_to_script(PgMessage.new(full_startup, :startup).inspect))
 
       username = nil
       startup_msg.split("\x00").each_slice(2) { |x| username = x[1] if x[0] == "user" }
 
       server_name = options[:target] || (target_via_sni ? target_via_sni.chomp(options[:delete_host_suffix]) : "localhost")
 
-      puts "#{conn_num}  connecting to Postgres server: #{server_name}"
+      cnputs.("connecting to Postgres server: #{server_name}")
 
       server_sock = TCPSocket.new(server_name, options[:connect_port])
 
@@ -803,10 +814,10 @@ loop do
 
         unless server_direct_ssl
           server_sock.write(ssl_request)
-          puts "#{conn_num}  " + script_to_server(annotate(hex_inspect(ssl_request), "SSLRequest"))
+          cnputs.(script_to_server(annotate(hex_inspect(ssl_request), "SSLRequest")))
 
           server_speaks_ssl = server_sock.read(1)
-          puts "#{conn_num}  " + server_to_script(annotate(server_speaks_ssl.inspect, server_speaks_ssl == "S" ? "SSL supported" : "SSL not supported"))
+          cnputs.(server_to_script(annotate(server_speaks_ssl.inspect, server_speaks_ssl == "S" ? "SSL supported" : "SSL not supported")))
         end
 
         if server_speaks_ssl == "S" || server_direct_ssl
@@ -837,21 +848,21 @@ loop do
           server_sock.hostname = server_name
           server_sock.connect
 
-          puts "#{conn_num}  #{server_direct_ssl ? "direct " : ""}#{tls_summary(server_sock)} connection established with server"
-          puts "#{conn_num}  #{server_sock.peer_cert.to_text}", "#{conn_num}  #{server_sock.peer_cert.to_pem}" if options[:log_certs]
+          cnputs.("#{server_direct_ssl ? "direct " : ""}#{tls_summary(server_sock)} connection established with server")
+          cnputs.("#{server_sock.peer_cert.to_text}", "  #{server_sock.peer_cert.to_pem}") if options[:log_certs]
 
         elsif server_speaks_ssl == "N"
           raise 'server does not support SSL' if options[:sslmode] != 'prefer'
-          puts "#{conn_num}  continuing without encryption"
+          cnputs.("continuing without encryption")
 
         else
           raise "expected S or N in response to SSLRequest, but got #{server_speaks_ssl.inspect}"
         end
       end
 
-      puts "#{conn_num}  forwarding client startup message to server"
+      cnputs.("forwarding client startup message to server")
       server_sock.write(full_startup)
-      puts "#{conn_num}  " + script_to_server(PgMessage.new(full_startup, :startup).inspect)
+      cnputs.(script_to_server(PgMessage.new(full_startup, :startup).inspect))
 
       server_reader = PGConnection.new(server_sock, :server)
       client_reader = PGConnection.new(client_sock, :client)
@@ -859,20 +870,20 @@ loop do
       # authentication override, if requested
 
       if options[:force_password] # request password from client, and use it to do either password or SCRAM auth with server
-        puts "#{conn_num}  now overriding authentication"
-        auth_msg = server_reader.next_message { |str| puts "#{conn_num}  " + server_to_script(str) }
+        cnputs.("now overriding authentication")
+        auth_msg = server_reader.next_message { |str| cnputs.(server_to_script(str)) }
         next if auth_msg.nil?
         raise "expected auth message" unless auth_msg[0] == "R"
 
         auth_type = auth_msg[5..8].unpack1("N")
         if auth_type == 0
-          puts "#{conn_num}  forwarding AuthenticationOk message to client"
-          pg_send(client_sock, [auth_msg], :server) { |str| puts "#{conn_num}  " + script_to_client(str) }
+          cnputs.("forwarding AuthenticationOk message to client")
+          pg_send(client_sock, [auth_msg], :server) { |str| cnputs.(script_to_client(str)) }
 
         else
           # request cleartext password from client
-          pg_send(client_sock, [pg_msg("R", "\x00\x00\x00\x03")], :server) { |str| puts "#{conn_num}  " + script_to_client(str) }
-          pwd_msg = client_reader.next_message(true) { |str| puts "#{conn_num}  " + client_to_script(str) }
+          pg_send(client_sock, [pg_msg("R", "\x00\x00\x00\x03")], :server) { |str| cnputs.(script_to_client(str)) }
+          pwd_msg = client_reader.next_message(true) { |str| cnputs.(client_to_script(str)) }
           next if pwd_msg.nil? # restart on disconnect: this happens if psql prompts the user for the password
           raise "expected password message" unless pwd_msg[0] == "p"
           pwd = pwd_msg[5..].unpack1("Z*") # remove null terminator
@@ -882,16 +893,16 @@ loop do
 
           case auth_type
           when 3 # AuthenticationCleartextPassword -> forward the client's message on
-            pg_send(server_sock, [pwd_msg], :client) { |str| puts "#{conn_num}  " + script_to_server(str) }
+            pg_send(server_sock, [pwd_msg], :client) { |str| cnputs.(script_to_server(str)) }
 
           when 5 # AuthenticationMD5
             salt = auth_msg[9..]
             md5 = Digest::MD5.hexdigest(Digest::MD5.hexdigest(pwd + username) + salt)
-            pg_send(server_sock, [pg_msg("p", "md5#{md5}\x00")], :client) { |str| puts "#{conn_num}  " + script_to_server(str) }
+            pg_send(server_sock, [pg_msg("p", "md5#{md5}\x00")], :client) { |str| cnputs.(script_to_server(str)) }
 
           when 10 # AuthenticationSASL
             unless has_sasl
-              puts "#{conn_num}  SCRAM auth was requested by server but is not supported on this version of Ruby: exiting"
+              cnputs.("SCRAM auth was requested by server but is not supported on this version of Ruby: exiting")
               exit 1
             end
             authenticators = { # highest preference first
@@ -905,16 +916,16 @@ loop do
             auth = authenticators[mechanism].new(username: "*", password: pwd, ssl_cert: options[:channel_binding] == 'disable' ? nil : server_sock.peer_cert)
             client_initial_msg = auth.process(nil)
             scram_msg = bin_str("#{mechanism}\x00#{[client_initial_msg.length].pack("N")}#{client_initial_msg}")
-            pg_send(server_sock, [pg_msg("p", scram_msg)], :client) { |str| puts "#{conn_num}  " + script_to_server(str) }
+            pg_send(server_sock, [pg_msg("p", scram_msg)], :client) { |str| cnputs.(script_to_server(str)) }
 
-            server_first_msg = server_reader.next_message { |str| puts "#{conn_num}  " + server_to_script(str) }
+            server_first_msg = server_reader.next_message { |str| cnputs.(server_to_script(str)) }
             next if server_first_msg.nil?
             raise "expected AuthenticationSASLContinue" unless server_first_msg[0] == "R" && server_first_msg[5..8] == bin_str("\x00\x00\x00\x0b")
 
             client_final_msg = auth.process(server_first_msg[9..])
-            pg_send(server_sock, [pg_msg("p", client_final_msg)], :client) { |str| puts "#{conn_num}  " + script_to_server(str) }
+            pg_send(server_sock, [pg_msg("p", client_final_msg)], :client) { |str| cnputs.(script_to_server(str)) }
 
-            server_final_message = server_reader.next_message { |str| puts "#{conn_num}  " + server_to_script(str) }
+            server_final_message = server_reader.next_message { |str| cnputs.(server_to_script(str)) }
             next if server_final_message.nil?
             raise "expected AuthenticationSASLFinal" unless server_final_message[0] == "R" && server_final_message[5..8] == bin_str("\x00\x00\x00\x0c")
 
@@ -929,15 +940,15 @@ loop do
       # proxy ongoing traffic
 
       log_proxied = options[:log_proxied] != "none"
-      puts "#{conn_num}  #{log_proxied ? "" : "silently "}forwarding all later traffic"
+      cnputs.("#{log_proxied ? "" : "silently "}forwarding all later traffic")
 
       # pass messages from server to client
       thread = Thread.new do
         while true do
-          messages = server_reader.available_messages { |str| puts "#{conn_num}  " + server_to_client(str) if log_proxied }
+          messages = server_reader.available_messages { |str| cnputs.(server_to_client(str)) if log_proxied }
           raise ServerEOFException.new if messages.nil?
           bytes_sent = pg_send(client_sock, messages)
-          puts "#{conn_num}  ^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer" if log_proxied
+          cnputs.("^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer") if log_proxied
         end
       end
       thread.report_on_exception = false
@@ -945,20 +956,20 @@ loop do
 
       # pass messages from client to server
       while true do
-        messages = client_reader.available_messages { |str| puts "#{conn_num}  " + client_to_server(str) if log_proxied }
+        messages = client_reader.available_messages { |str| cnputs.(client_to_server(str)) if log_proxied }
         raise ClientEOFException.new if messages.nil?
         bytes_sent = pg_send(server_sock, messages)
-        puts "#{conn_num}  ^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer" if log_proxied
+        cnputs.("^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer") if log_proxied
       end
 
     rescue ServerEOFException
-      puts "#{conn_num}  server hung up"
+      cnputs.(" server hung up")
 
     rescue ClientEOFException
-      puts "#{conn_num}  client hung up"
+      cnputs.("client hung up")
 
     ensure
-      puts "#{conn_num}  connection end", "" # empty string = extra newline
+      cnputs.("connection end", "") # empty string = extra newline
       client_sock.close unless client_sock.nil?
       thread.kill unless thread.nil?
 
@@ -966,5 +977,5 @@ loop do
     end
   end # end of Thread.new block
 
-  connection_mutex.synchronize { conn_num += 1 }
+  conn_num += 1
 end
