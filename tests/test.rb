@@ -3,6 +3,7 @@ require 'socket'
 require 'timeout'
 require 'tmpdir'
 require 'uri'
+require 'open3'
 
 QUIET = ARGV[0] != "--verbose"
 FILTER = ARGV[QUIET ? 0 : 1]
@@ -119,7 +120,8 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
   end
 
   def contains(haystack, needle, expected = true)
-    return true if haystack.include?(needle) == expected
+    tidy_haystack = haystack.gsub(/^#[0-9]+  /m, '')  # remove connection numbers
+    return true if tidy_haystack.include?(needle) == expected
     puts haystack
     puts "-> unexpectedly #{expected ? 'did not contain' : 'contained'}: #{needle}"
     false
@@ -193,7 +195,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
         rescue => e
           err_msg = e.message
         end
-        contains(err_msg, 'SSL connection has been closed unexpectedly')
+        contains(err_msg, 'certificate verify failed')
       end
 
       do_test("connecting to server with --server-sslmode=verify-full fails with appropriate --server-sslrootcert if host doesn't match (^^ error expected)") do
@@ -205,7 +207,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
         rescue => e
           err_msg = e.message
         end
-        contains(err_msg, 'SSL connection has been closed unexpectedly')
+        contains(err_msg, 'certificate verify failed')
       end
 
       do_test("connecting to server with --server-sslmode=verify-full succeeds with appropriate ---server-sslrootcert") do
@@ -224,7 +226,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
         rescue => e
           err_msg = e.message
         end
-        contains(err_msg, 'SSL connection has been closed unexpectedly')
+        contains(err_msg, 'certificate verify failed')
       end
 
       do_test("connecting to server with --server-sslmode=verify-ca succeeds with appropriate ---server-sslrootcert") do
@@ -250,7 +252,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
         rescue => e
           err_msg = e.message
         end
-        contains(err_msg, 'SSL connection has been closed unexpectedly')
+        contains(err_msg, 'certificate verify failed')
       end
 
       if ENV['DATABASE_URL'].nil?
@@ -303,7 +305,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(es_log, 'now overriding authentication' + "\n" +
-                                     'server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x00\x0a" = AuthenticationSASL')
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x00\x0a" = AuthenticationSASL')
       end
 
       do_test("--override-auth logs password") do
@@ -325,7 +327,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(es_log, 'client -> script: [password message redacted]' + "\n" +
-                                     'script -> server: [password message redacted]')
+                                   'script -> server: [password message redacted]')
       end
 
       do_test("--override-auth with channel binding") do
@@ -333,7 +335,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(es_log, 'script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x65" = 101 bytes' + "\n" +
-                                     '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
+                                   '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
       end
 
       do_test("--override-auth with no channel binding") do
@@ -341,7 +343,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(es_log, 'script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x4b" = 75 bytes' + "\n" +
-                                     '  "SCRAM-SHA-256\x00" = selected mechanism')
+                                   '  "SCRAM-SHA-256\x00" = selected mechanism')
       end
 
       do_test("--send-chunking byte") do
@@ -357,27 +359,27 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=require')
         end
         result && contains(es_log, 'client -> server: "p" = SASLInitialResponse "\x00\x00\x00\x50" = 80 bytes' + "\n" +
-                                     '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
+                                   '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
       end
 
       do_test("--log-certs with RSA generated cert") do
         result, es_log = with_elephantshark("--log-certs") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
-        result && contains(es_log, '        Subject: CN=Elephantshark' + "\n" +
-                                     '        Subject Public Key Info:' + "\n" +
-                                     '            Public Key Algorithm: rsaEncryption' + "\n" +
-                                     '                Public-Key: (2048 bit)')
+        result && contains(es_log, '          Subject: CN=Elephantshark' + "\n" +
+                                   '          Subject Public Key Info:' + "\n" +
+                                   '              Public Key Algorithm: rsaEncryption' + "\n" +
+                                   '                  Public-Key: (2048 bit)')
       end
 
       do_test("--log-certs with ECDSA generated cert") do
         result, es_log = with_elephantshark("--log-certs --client-cert-sig ecdsa") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
-        result && contains(es_log, '        Subject: CN=Elephantshark' + "\n" +
-                                     '        Subject Public Key Info:' + "\n" +
-                                     '            Public Key Algorithm: id-ecPublicKey' + "\n" +
-                                     '                Public-Key: (256 bit)')
+        result && contains(es_log, '          Subject: CN=Elephantshark' + "\n" +
+                                   '          Subject Public Key Info:' + "\n" +
+                                   '              Public Key Algorithm: id-ecPublicKey' + "\n" +
+                                   '                  Public-Key: (256 bit)')
       end
 
       do_test("--client-deny-ssl causes connection error with sslmode=require") do
@@ -544,7 +546,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'forwarding all later traffic' + "\n" +
-                                     'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
+                                   'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
       end
 
       do_test("--override-auth + trust auth") do
@@ -552,7 +554,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'now overriding authentication' + "\n" +
-                                     'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
       end
     end
 
@@ -562,7 +564,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'forwarding all later traffic' + "\n" +
-                                     'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
+                                   'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
       end
 
       do_test("--redact-passwords + cleartext password auth") do
@@ -577,7 +579,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'now overriding authentication' + "\n" +
-                                     'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
       end
 
       do_test("--override-auth + --redact-passwords + cleartext password auth") do
@@ -585,7 +587,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password' + "\n" +
-                                     'script -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+                                   'script -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
       end
     end
 
@@ -595,7 +597,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'forwarding all later traffic' + "\n" +
-                                     'server -> client: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
+                                   'server -> client: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
       end
 
       do_test("--override-auth + MD5 auth") do
@@ -603,7 +605,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
         end
         result && contains(es_log, 'now overriding authentication' + "\n" +
-                                     'server -> script: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
       end
     end
 
@@ -638,8 +640,8 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
 
     with_postgres("scram-sha-256\nhost replication all 0.0.0.0/0 scram-sha-256", 54320,
                   "-c wal_level=logical \
-                        -c max_wal_senders=3 \
-                        -c max_replication_slots=3") do
+                   -c max_wal_senders=3 \
+                   -c max_replication_slots=3") do
 
       PG.connect('postgresql://frodo:friend@localhost:54320/frodo') do |conn|
         conn.exec("CREATE TABLE t1 (a int, b text, PRIMARY KEY(a));")
