@@ -153,6 +153,8 @@ def script_to_server(s) "#{colour(Colour::C2S, "script -> server:")} #{s}" end
 # Postgres message parsing/annotation
 
 class PgMessage
+  @@prev_auth_type = nil # lets us better interpret some auth messages
+
   def initialize(msg, source)
     @msg = msg
     @source = source # :server, :client, :startup or nil
@@ -814,13 +816,13 @@ loop do
     startup_msg.split("\x00").each_slice(2) { |x| username = x[1] if x[0] == "user" }
 
     server_name = options[:target] || (target_via_sni ? target_via_sni.chomp(options[:delete_host_suffix]) : "localhost")
-
     cnputs.("connecting to Postgres server: #{server_name}")
 
     server_sock = TCPSocket.new(server_name, options[:connect_port])
 
     if options[:sslmode] != 'disable'
       server_direct_ssl = options[:ssl_negotiation] == "direct" || (options[:ssl_negotiation] == "mimic" && client_direct_ssl)
+      server_speaks_ssl = nil
 
       unless server_direct_ssl
         server_sock.write(ssl_request)
