@@ -440,7 +440,6 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
           threads.each(&:join) 
         end
         t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        puts t1 - t0
         !rescued && results.all? && t1 - t0 < 4
       end
 
