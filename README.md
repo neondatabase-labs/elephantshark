@@ -36,7 +36,7 @@ Or on any platform, simply download [the `elephantshark` script](elephantshark) 
 
 ```bash
 % elephantshark
-listening ...
+#1  listening on 127.0.0.1 port 5432 ...
 ```
 
 In a second terminal, connect to and query a Neon Postgres database via Elephantshark by (1) appending `.local.neon.build` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
